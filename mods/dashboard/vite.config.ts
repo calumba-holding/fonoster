@@ -22,6 +22,9 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [reactRouter(), tsconfigPaths()],
+  resolve: {
+    dedupe: ["react", "react-dom", "react/jsx-runtime"]
+  },
   ssr: {
     noExternal: ["@mui/*", "@emotion/*"]
   },

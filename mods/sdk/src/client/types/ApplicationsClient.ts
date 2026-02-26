@@ -23,8 +23,8 @@ import {
   CreateApplicationResponse,
   DeleteApplicationRequest,
   DeleteApplicationResponse,
+  EvaluateIntelligenceEvent,
   EvaluateIntelligenceRequest,
-  EvaluateIntelligenceResponse,
   GetApplicationRequest,
   ListApplicationsRequest,
   ListApplicationsResponse,
@@ -33,6 +33,7 @@ import {
   UpdateApplicationResponse
 } from "../../generated/web/applications_pb";
 import { ClientFunction } from "./common";
+import type { ClientReadableStream } from "grpc-web";
 
 type ApplicationsClient = {
   createApplication: ClientFunction<
@@ -52,10 +53,10 @@ type ApplicationsClient = {
     DeleteApplicationRequest,
     DeleteApplicationResponse
   >;
-  evaluateIntelligence: ClientFunction<
-    EvaluateIntelligenceRequest,
-    EvaluateIntelligenceResponse
-  >;
+  evaluateIntelligence: (
+    request: EvaluateIntelligenceRequest,
+    metadata?: Record<string, string> | null
+  ) => ClientReadableStream<EvaluateIntelligenceEvent>;
   createTestToken: ClientFunction<Empty, TestTokenResponse>;
 };
 

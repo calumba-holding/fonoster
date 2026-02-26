@@ -20,31 +20,33 @@ import {
   assistantSchema,
   findIntegrationsCredentials,
   getAccessKeyIdFromCall,
-  GrpcErrorMessage,
-  IntegrationConfig,
-  withErrorHandling
+  IntegrationConfig
 } from "@fonoster/common";
 import { getLogger } from "@fonoster/logger";
-import { ScenarioEvaluationReport } from "@fonoster/types";
 import { ServerInterceptingCall } from "@grpc/grpc-js";
 import { Struct, struct } from "pb-util";
 import { z } from "zod";
 import { createEvalEffectiveConfig } from "./createEvalEffectiveConfig";
-import { evalTestCases } from "./evalTestCases";
+import { runEval } from "./runEval";
+import {
+  evalErrorToEventPayload,
+  scenarioSummaryToEventPayload,
+  stepReportToEventPayload
+} from "./stepReportToEventPayload";
 import { EvaluateIntelligenceRequest } from "./types";
 
 const logger = getLogger({ service: "apiserver", filePath: __filename });
 
+type ServerStreamCall = {
+  request: EvaluateIntelligenceRequest;
+  write: (chunk: Record<string, unknown>) => void;
+  end: () => void;
+};
+
 function createEvaluateIntelligence(integrations: IntegrationConfig[]) {
   const evaluateIntelligence = async (
-    call: {
-      request: EvaluateIntelligenceRequest;
-    },
-    callback: (
-      error: GrpcErrorMessage,
-      response?: { results: ScenarioEvaluationReport[] }
-    ) => void
-  ) => {
+    call: ServerStreamCall
+  ): Promise<void> => {
     const { request } = call;
     const { intelligence } = request;
 
@@ -58,44 +60,60 @@ function createEvaluateIntelligence(integrations: IntegrationConfig[]) {
       evalLlmProductRef: "llm.openai"
     });
 
-    const config = struct.decode(intelligence.config as unknown as Struct);
+    try {
+      const config = struct.decode(intelligence.config as unknown as Struct);
 
-    const parsedIntelligence = z
-      .object({
-        productRef: z.string(),
-        config: assistantSchema
-      })
-      .parse({
-        productRef: intelligence.productRef,
-        config: config
-      });
+      const parsedIntelligence = z
+        .object({
+          productRef: z.string(),
+          config: assistantSchema
+        })
+        .parse({
+          productRef: intelligence.productRef,
+          config
+        });
 
-    const credentials = findIntegrationsCredentials(
-      integrations,
-      intelligence.productRef
-    ) as { apiKey: string };
+      const credentials = findIntegrationsCredentials(
+        integrations,
+        intelligence.productRef
+      ) as { apiKey: string };
 
-    const evaluationApiKey = findIntegrationsCredentials(
-      integrations,
-      "llm.openai"
-    ) as { apiKey: string };
+      const evaluationApiKey = findIntegrationsCredentials(
+        integrations,
+        "llm.openai"
+      ) as { apiKey: string };
 
-    const effectiveConfig = createEvalEffectiveConfig(
-      parsedIntelligence.config,
-      credentials,
-      evaluationApiKey
-    );
+      const effectiveConfig = createEvalEffectiveConfig(
+        parsedIntelligence.config,
+        credentials,
+        evaluationApiKey
+      );
 
-    const results = await evalTestCases({
-      intelligence: {
-        config: effectiveConfig
-      }
-    });
-
-    callback(null, { results });
+      await runEval(
+        { intelligence: { config: effectiveConfig } },
+        {
+          onStepResult: (scenarioRef, stepReport) => {
+            const payload = stepReportToEventPayload(scenarioRef, stepReport);
+            call.write(payload);
+          },
+          onScenarioComplete: (scenarioRef, overallPassed) => {
+            const payload = scenarioSummaryToEventPayload(
+              scenarioRef,
+              overallPassed
+            );
+            call.write(payload);
+          }
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      call.write(evalErrorToEventPayload(message));
+    } finally {
+      call.end();
+    }
   };
 
-  return withErrorHandling(evaluateIntelligence);
+  return evaluateIntelligence;
 }
 
 export { createEvaluateIntelligence };

@@ -24,6 +24,7 @@ import { TelephonyContext } from "../types";
 import { createTestTextSimilarity } from "./createTestTextSimilarity";
 import { evaluateScenario } from "./evaluateScenario";
 import { textSimilaryPrompt } from "./textSimilaryPrompt";
+import { EvalScenario } from "./types";
 
 export async function evalTestCases(autopilotApplication: {
   intelligence: {
@@ -37,8 +38,10 @@ export async function evalTestCases(autopilotApplication: {
   } as Voice;
 
   const evaluationReports: ScenarioEvaluationReport[] = [];
+  const scenarios = (testCases?.scenarios ?? []) as EvalScenario[];
 
-  for (const scenario of testCases?.scenarios ?? []) {
+  for (let i = 0; i < scenarios.length; i++) {
+    const scenario = scenarios[i];
     const languageModel = createLanguageModel({
       voice,
       assistantConfig: autopilotApplication.intelligence.config,

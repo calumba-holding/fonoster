@@ -19,7 +19,9 @@
 import { StepEvaluationReport } from "@fonoster/types";
 import { evaluateTextResponse } from "./evaluateTextResponse";
 import { evaluateToolCalls } from "./evaluateToolCalls";
+import { extractAiResponse } from "./extractAiResponse";
 import { EvaluateStepParams } from "./types";
+import type { ExpectedTextType } from "@fonoster/types";
 
 export async function evaluateStep({
   step,
@@ -30,32 +32,20 @@ export async function evaluateStep({
   const stepResult: StepEvaluationReport = {
     humanInput: step.userInput,
     expectedResponse: step.expected.text.response,
-    aiResponse: "", // will be filled if invoke is successful
-    evaluationType: step.expected.text.type,
+    aiResponse: "",
+    evaluationType: step.expected.text.type as unknown as ExpectedTextType,
     passed: true
   };
 
   try {
     const response = await languageModel.invoke(step.userInput);
-
-    // Hangup and transfer are special cases
-    if (response.toolCalls && response.toolCalls.length > 0) {
-      const topTool = response.toolCalls[0];
-      if (topTool.name === "hangup") {
-        stepResult.aiResponse =
-          assistantConfig.conversationSettings?.goodbyeMessage || "";
-      } else if (topTool.name === "transfer") {
-        stepResult.aiResponse =
-          assistantConfig.conversationSettings?.transferOptions?.message ?? "";
-      } else {
-        stepResult.aiResponse = response.content ?? "";
-      }
-    } else {
-      stepResult.aiResponse = response.content ?? "";
-    }
+    stepResult.aiResponse = extractAiResponse(response, assistantConfig);
 
     const textEvaluation = await evaluateTextResponse(
-      step.expected.text,
+      {
+        type: step.expected.text.type as unknown as ExpectedTextType,
+        response: step.expected.text.response
+      },
       stepResult.aiResponse,
       testTextSimilarity
     );
@@ -66,10 +56,8 @@ export async function evaluateStep({
     }
 
     if (step.expected.tools && step.expected.tools.length > 0) {
-      const toolsEvaluation = evaluateToolCalls(
-        step.expected.tools,
-        response.toolCalls
-      );
+      const toolCalls = response.toolCalls?.filter((tc) => tc?.name) ?? [];
+      const toolsEvaluation = evaluateToolCalls(step.expected.tools, toolCalls);
       stepResult.toolEvaluations = toolsEvaluation.evaluations;
       if (!toolsEvaluation.passed) {
         stepResult.passed = false;
